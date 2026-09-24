@@ -185,11 +185,34 @@ def test_stdio_loops_in_process(tmp_path: Path, capsys: pytest.CaptureFixture[st
             "params": {"name": "add", "arguments": {"a": 4, "b": 5}},
         },
     ]
-    stdin = io.BytesIO(("\n".join(_json.dumps(m) for m in msgs) + "\nnot json\n").encode())
-    out = io.BytesIO()
+    import os
+    import threading
+
+    class Out(io.BytesIO):
+        """Signals once the tools/call reply has been written."""
+
+        got = threading.Event()
+
+        def write(self, b: bytes) -> int:  # type: ignore[override]
+            n = super().write(b)
+            if b'"id":2' in b.replace(b" ", b""):
+                self.got.set()
+            return n
+
+    r, w = os.pipe()
+    out = Out()
     path = tmp_path / "s.jsonl"
-    # The server exits when its stdin closes, which ends the proxy.
-    assert run_stdio_record(path, [sys.executable, SERVER], stdin, out) == 0
+    codes: list[int] = []
+    t = threading.Thread(
+        target=lambda: codes.append(run_stdio_record(path, [sys.executable, SERVER], os.fdopen(r, "rb"), out))
+    )
+    t.start()
+    os.write(w, ("\n".join(_json.dumps(m) for m in msgs) + "\nnot json\n").encode())
+    # Keep stdin open until the reply arrives, as a real client does; closing it stops the server.
+    assert out.got.wait(30)
+    os.close(w)
+    t.join(30)
+    assert codes == [0]
     replies = [_json.loads(x) for x in out.getvalue().splitlines() if x.strip()]
     assert any(r.get("id") == 2 for r in replies)
     run = Run.load(path)
