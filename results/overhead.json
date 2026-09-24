@@ -1,0 +1,21 @@
+{
+  "env": {
+    "python": "3.13.14",
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "recorder": {
+    "median_us": 3.9287271,
+    "min_us": 3.6043187000000003,
+    "calls": 20000,
+    "reps": 7
+  },
+  "langgraph_callback": {
+    "steps_per_run": 11,
+    "run_without_ms": 5.777441110000001,
+    "overhead_per_run_ms": 0.07668542,
+    "overhead_per_step_us": 6.9714018181818185,
+    "runs": 300,
+    "reps": 5
+  }
+}

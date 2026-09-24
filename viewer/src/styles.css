@@ -1,0 +1,133 @@
+:root {
+  --paper: #eef1ef;
+  --panel: #f8faf9;
+  --ink: #16201e;
+  --muted: #56625f;
+  --line: #cdd5d2;
+  --rail-shared: #2f3b39;
+  --rail-a: #13608a;
+  --rail-b: #7a3fb0;
+  --fork: #b3261e;
+  --ins: #dcefe0;
+  --del: #f6dcd8;
+  --focus: #13608a;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --paper: #131917;
+    --panel: #1a2220;
+    --ink: #e4ebe8;
+    --muted: #9aa8a4;
+    --line: #2d3835;
+    --rail-shared: #c9d4d0;
+    --rail-a: #5fb3e0;
+    --rail-b: #c49af0;
+    --fork: #ff8a7a;
+    --ins: #1f3a28;
+    --del: #45231f;
+    --focus: #5fb3e0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --paper: #131917;
+  --panel: #1a2220;
+  --ink: #e4ebe8;
+  --muted: #9aa8a4;
+  --line: #2d3835;
+  --rail-shared: #c9d4d0;
+  --rail-a: #5fb3e0;
+  --rail-b: #c49af0;
+  --fork: #ff8a7a;
+  --ins: #1f3a28;
+  --del: #45231f;
+  --focus: #5fb3e0;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.5 'IBM Plex Sans', system-ui, sans-serif;
+}
+button, input, label { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code, pre, .name, .id, .peek { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+
+.app { max-width: 1280px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+header { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; justify-content: space-between; }
+h1 { margin: 0; font-size: 1.35rem; font-weight: 600; letter-spacing: -0.01em; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.file, .actions button, .intro button {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer;
+}
+.file { position: relative; border-left-width: 4px; }
+.file.a { border-left-color: var(--rail-a); }
+.file.b { border-left-color: var(--rail-b); }
+.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.file:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ghost { background: transparent !important; }
+
+.summary { margin: 1.25rem 0 0; font-size: 1.05rem; max-width: 72ch; }
+.error { color: var(--fork); }
+
+main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; margin-top: 1.25rem; align-items: start; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+.intro { grid-column: 1 / -1; max-width: 64ch; }
+.intro h2 { font-size: 1.6rem; font-weight: 500; margin: 1.5rem 0 0.5rem; letter-spacing: -0.015em; }
+
+/* The rail: shared steps sit on one line; after the fork, A and B each have their own. */
+.rows { list-style: none; margin: 0; padding: 0; }
+.row button {
+  display: flex; width: 100%; align-items: center; gap: 0.6rem; text-align: left; background: none; border: 0;
+  padding: 0.45rem 0.75rem; cursor: pointer; border-radius: 6px; min-height: 2.5rem;
+}
+.row button:hover { background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.row.on button { background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+.dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--rail-shared); position: relative; }
+.single .row, .fork .row.shared .cell.both { position: relative; }
+
+.fork .row.shared .cell.both, .single .row button { background-image: linear-gradient(var(--rail-shared), var(--rail-shared)); background-size: 2px 100%; background-repeat: no-repeat; background-position: calc(0.75rem + 4px) 0; }
+.fork .row.shared .cell.both { display: flex; align-items: center; gap: 0.6rem; width: 100%; padding-left: 0.75rem; margin-left: -0.75rem; }
+
+.fork .row.split button { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; padding-top: 0.35rem; padding-bottom: 0.35rem; }
+.cell { display: flex; align-items: center; gap: 0.5rem; min-width: 0; padding-left: 0.2rem; }
+.cell.a { background: linear-gradient(var(--rail-a), var(--rail-a)) no-repeat calc(0.2rem + 4px) 0 / 2px 100%; }
+.cell.b { background: linear-gradient(var(--rail-b), var(--rail-b)) no-repeat calc(0.2rem + 4px) 0 / 2px 100%; }
+.cell.a .dot { background: var(--rail-a); }
+.cell.b .dot { background: var(--rail-b); }
+.row.removed .cell.b .dot, .row.added .cell.a .dot { background: transparent; box-shadow: inset 0 0 0 2px var(--line); }
+.none { color: var(--muted); font-style: italic; font-size: 0.9em; }
+.tag { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+.row.changed .tag, .row.equal .tag { color: var(--ink); }
+
+.forkmark {
+  margin: 0.75rem 0 0.25rem; padding: 0.5rem 0.75rem; border-left: 4px solid var(--fork);
+  background: color-mix(in srgb, var(--fork) 10%, var(--panel)); font-weight: 500;
+}
+.row.first .dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--fork) 35%, transparent); }
+
+.label { display: inline-flex; align-items: baseline; gap: 0.45rem; min-width: 0; }
+.kind { font-size: 0.75rem; color: var(--muted); width: 2.6rem; flex: none; }
+.name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.id { font-size: 0.75rem; color: var(--muted); }
+.err { font-size: 0.75rem; color: var(--fork); font-weight: 600; }
+.peek { margin-left: auto; color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+
+.detail { position: sticky; top: 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; max-height: calc(100vh - 2rem); overflow: auto; }
+.detail.empty { color: var(--muted); }
+.detail h2 { margin: 0; font-size: 1.05rem; }
+.detail h3 { margin: 1rem 0 0.35rem; font-size: 0.9rem; font-weight: 600; }
+.meta { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.85rem; }
+.code { margin: 0; padding: 0.6rem 0.7rem; background: var(--paper); border-radius: 6px; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.code .sign { display: inline-block; width: 1.1em; color: var(--muted); user-select: none; }
+.code .ins { background: var(--ins); }
+.code .del { background: var(--del); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .row button { transition: background-color 120ms ease; }
+}

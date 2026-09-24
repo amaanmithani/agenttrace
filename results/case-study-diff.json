@@ -1,0 +1,132 @@
+{
+  "identical": false,
+  "stats": {
+    "equal": 5,
+    "changed": 2,
+    "removed": 0,
+    "added": 0,
+    "output_differs": 3
+  },
+  "first_divergence": {
+    "op": "equal",
+    "a": {
+      "id": 5,
+      "kind": "tool",
+      "name": "lookup_order"
+    },
+    "b": {
+      "id": 5,
+      "kind": "tool",
+      "name": "lookup_order"
+    },
+    "output_differs": true,
+    "input_delta": [],
+    "output_delta": [
+      "--- a",
+      "+++ b",
+      "@@ -1 +1 @@",
+      "-item=headphones, price=89.0, days_since_delivery=12, opened=True",
+      "+item=headphones, price=89.0, days_since_delivery=12"
+    ]
+  },
+  "entries": [
+    {
+      "op": "equal",
+      "a": {
+        "id": 1,
+        "kind": "node",
+        "name": "LangGraph"
+      },
+      "b": {
+        "id": 1,
+        "kind": "node",
+        "name": "LangGraph"
+      },
+      "output_differs": true
+    },
+    {
+      "op": "equal",
+      "a": {
+        "id": 2,
+        "kind": "node",
+        "name": "agent"
+      },
+      "b": {
+        "id": 2,
+        "kind": "node",
+        "name": "agent"
+      },
+      "output_differs": false
+    },
+    {
+      "op": "equal",
+      "a": {
+        "id": 3,
+        "kind": "llm",
+        "name": "ChatOllama"
+      },
+      "b": {
+        "id": 3,
+        "kind": "llm",
+        "name": "ChatOllama"
+      },
+      "output_differs": false
+    },
+    {
+      "op": "equal",
+      "a": {
+        "id": 4,
+        "kind": "node",
+        "name": "tools"
+      },
+      "b": {
+        "id": 4,
+        "kind": "node",
+        "name": "tools"
+      },
+      "output_differs": true
+    },
+    {
+      "op": "equal",
+      "a": {
+        "id": 5,
+        "kind": "tool",
+        "name": "lookup_order"
+      },
+      "b": {
+        "id": 5,
+        "kind": "tool",
+        "name": "lookup_order"
+      },
+      "output_differs": true
+    },
+    {
+      "op": "changed",
+      "a": {
+        "id": 6,
+        "kind": "node",
+        "name": "agent"
+      },
+      "b": {
+        "id": 6,
+        "kind": "node",
+        "name": "agent"
+      },
+      "output_differs": false
+    },
+    {
+      "op": "changed",
+      "a": {
+        "id": 7,
+        "kind": "llm",
+        "name": "ChatOllama"
+      },
+      "b": {
+        "id": 7,
+        "kind": "llm",
+        "name": "ChatOllama"
+      },
+      "output_differs": false
+    }
+  ]
+}

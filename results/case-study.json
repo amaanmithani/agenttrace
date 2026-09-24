@@ -1,0 +1,33 @@
+{
+  "model": "llama3.1:8b",
+  "question": "Hi, I'd like a refund for order 42, the headphones. Can I get my money back?",
+  "answers": {
+    "before": "Based on our refund policy, since the headphones have been delivered for over 30 days and you've opened them, unfortunately, we cannot offer a full refund, but we can provide a store credit of $20 towards your next purchase.",
+    "after": "Based on our refund policy, since it's been 12 days since the headphones were delivered and you haven't contacted us within 30 days of delivery, unfortunately, we can only offer a partial refund for any unopened or unused items."
+  },
+  "steps": {
+    "before": 7,
+    "after": 7
+  },
+  "first_divergence": {
+    "kind": "tool",
+    "name": "lookup_order",
+    "op": "equal",
+    "output_differs": true,
+    "step_index_in_before": 5
+  },
+  "stats": {
+    "equal": 5,
+    "changed": 2,
+    "removed": 0,
+    "added": 0,
+    "output_differs": 3
+  },
+  "controls": {
+    "full_replay_identical": true,
+    "full_replay_answer_matches": true,
+    "tools_only_replay_identical": true,
+    "tools_only_answer_matches": true
+  },
+  "diff_text": "5 equal, 2 changed, 0 only in A, 0 only in B, 3 same request with a different result\n\nfirst divergence: tool lookup_order (A #5 / B #5): same input, different result\n  output:\n    -item=headphones, price=89.0, days_since_delivery=12, opened=True\n    +item=headphones, price=89.0, days_since_delivery=12"
+}
