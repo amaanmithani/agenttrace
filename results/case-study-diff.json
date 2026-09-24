@@ -63,12 +63,12 @@
       "a": {
         "id": 3,
         "kind": "llm",
-        "name": "ChatOllama"
+        "name": "llama3.1:8b"
       },
       "b": {
         "id": 3,
         "kind": "llm",
-        "name": "ChatOllama"
+        "name": "llama3.1:8b"
       },
       "output_differs": false
     },
@@ -119,12 +119,12 @@
       "a": {
         "id": 7,
         "kind": "llm",
-        "name": "ChatOllama"
+        "name": "llama3.1:8b"
       },
       "b": {
         "id": 7,
         "kind": "llm",
-        "name": "ChatOllama"
+        "name": "llama3.1:8b"
       },
       "output_differs": false
     }

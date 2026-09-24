@@ -27,7 +27,15 @@
     "full_replay_identical": true,
     "full_replay_answer_matches": true,
     "tools_only_replay_identical": true,
-    "tools_only_answer_matches": true
+    "tools_only_answer_matches": true,
+    "tools_only_after_replay_identical": true,
+    "tools_only_after_answer_matches": true
   },
+  "tools_called": [
+    "lookup_order"
+  ],
+  "tools_never_called": [
+    "refund_policy"
+  ],
   "diff_text": "5 equal, 2 changed, 0 only in A, 0 only in B, 3 same request with a different result\n\nfirst divergence: tool lookup_order (A #5 / B #5): same input, different result\n  output:\n    -item=headphones, price=89.0, days_since_delivery=12, opened=True\n    +item=headphones, price=89.0, days_since_delivery=12"
 }

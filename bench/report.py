@@ -21,12 +21,36 @@ def overhead() -> str:
 | What | Per step |
 |---|---|
 | `Recorder.step()` around a no-op (median of {r["reps"]}×{r["calls"]:,} calls) | {r["median_us"]:.1f} µs |
-| LangGraph callback, support agent with a scripted model ({c["steps_per_run"]} steps/run, {c["reps"]}×{c["runs"]} runs) | {c["overhead_per_step_us"]:.1f} µs |
+| LangGraph callback, support agent with a scripted model ({c["steps_per_run"]} steps/run, {c["reps"]} paired reps of {c["runs"]} runs; IQR {c["overhead_per_step_us_p25"]:.1f}–{c["overhead_per_step_us_p75"]:.1f}) | {c["overhead_per_step_us"]:.1f} µs |
 
-The callback adds {c["overhead_per_run_ms"]:.2f} ms to a run that takes {c["run_without_ms"]:.1f} ms with a model that
+The recorder figure includes copying the input and output (so a redactor never touches live objects) but not writing
+the file. The callback figure is a paired difference: the graph is built once and each rep times the same number of
+invocations with and without the callback, alternating which goes first. The callback adds {c["overhead_per_run_ms"]:.2f} ms to a run that takes {c["run_without_ms"]:.1f} ms with a model that
 answers instantly; against a real model call (hundreds of milliseconds) it is noise.
 Python {env["python"]}, {env["system"]} {env["machine"]}. Reproduce: `uv run python bench/overhead.py`.
 """
+
+
+def control_text(ctl: dict[str, bool]) -> str:
+    if all(ctl.values()):
+        return (
+            "With the tool responses pinned, the live model reproduces each run exactly, in both directions: at "
+            "temperature 0 with a fixed seed it is deterministic on these inputs, so the tool output alone decides "
+            "which run you get. This is one sample per condition; it rules out sampling noise for this model and "
+            "these settings, not in general."
+        )
+    return "At least one control failed (see the table), so sampling noise can't be ruled out for this case."
+
+
+def never_called(c: dict) -> str:  # type: ignore[type-arg]
+    miss = c.get("tools_never_called") or []
+    if not miss:
+        return ""
+    return (
+        f"The model never called {', '.join(f'`{m}`' for m in miss)} in either run, although the system prompt tells it "
+        "to; both answers state a refund policy the model never read. That's a real weakness of this 8B model as an "
+        "agent, and exactly the kind of thing the recorded runs make visible."
+    )
 
 
 def case_study() -> str:
@@ -61,9 +85,12 @@ Controls:
 | ...and gives the same final answer | {yes(ctl["full_replay_answer_matches"])} |
 | Live model again with "before"'s tool responses pinned: identical run | {yes(ctl["tools_only_replay_identical"])} |
 | ...same final answer | {yes(ctl["tools_only_answer_matches"])} |
+| Live model with "after"'s tool responses pinned: identical to "after" | {yes(ctl["tools_only_after_replay_identical"])} |
+| ...same final answer | {yes(ctl["tools_only_after_answer_matches"])} |
 
-The last two rows are the control for sampling noise: with the tool responses held fixed, the live model reproduces the
-"before" run, so the change in behaviour comes from the tool.
+{control_text(ctl)}
+
+{never_called(c)}
 Reproduce: `uv run python examples/case_study.py` (needs Ollama with `{c["model"]}`); the recorded runs are committed in
 `examples/runs/`, and CI re-diffs them on every push.
 """

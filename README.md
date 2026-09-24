@@ -69,8 +69,10 @@ with rec.step("tool", "search", input={"q": "refund"}) as s:
     s.set_output(search("refund"))
 ```
 
-Steps nest by context (threads and asyncio tasks each keep their own parent). A `redact` hook runs on every step before
-it is stored.
+Steps nest by context: asyncio tasks inherit the step they were started from. New threads don't inherit context in
+Python, so wrap their target with `rec.bind(fn)` to carry the recorder and parent step across. Inputs and outputs are
+copied when recorded, and a `redact` hook runs on the copy before a step is written; steps still in flight are never
+written.
 
 ## Case study: the tool that changed the answer
 
@@ -110,9 +112,12 @@ Controls:
 | ...and gives the same final answer | yes |
 | Live model again with "before"'s tool responses pinned: identical run | yes |
 | ...same final answer | yes |
+| Live model with "after"'s tool responses pinned: identical to "after" | yes |
+| ...same final answer | yes |
 
-The last two rows are the control for sampling noise: with the tool responses held fixed, the live model reproduces the
-"before" run, so the change in behaviour comes from the tool.
+With the tool responses pinned, the live model reproduces each run exactly, in both directions: at temperature 0 with a fixed seed it is deterministic on these inputs, so the tool output alone decides which run you get. This is one sample per condition; it rules out sampling noise for this model and these settings, not in general.
+
+The model never called `refund_policy` in either run, although the system prompt tells it to; both answers state a refund policy the model never read. That's a real weakness of this 8B model as an agent, and exactly the kind of thing the recorded runs make visible.
 Reproduce: `uv run python examples/case_study.py` (needs Ollama with `llama3.1:8b`); the recorded runs are committed in
 `examples/runs/`, and CI re-diffs them on every push.
 <!-- case:end -->
@@ -122,10 +127,12 @@ Reproduce: `uv run python examples/case_study.py` (needs Ollama with `llama3.1:8
 <!-- overhead:start -->
 | What | Per step |
 |---|---|
-| `Recorder.step()` around a no-op (median of 7×20,000 calls) | 3.9 µs |
-| LangGraph callback, support agent with a scripted model (11 steps/run, 5×300 runs) | 7.0 µs |
+| `Recorder.step()` around a no-op (median of 7×20,000 calls) | 8.6 µs |
+| LangGraph callback, support agent with a scripted model (11 steps/run, 15 paired reps of 200 runs; IQR 31.9–40.0) | 35.2 µs |
 
-The callback adds 0.08 ms to a run that takes 5.8 ms with a model that
+The recorder figure includes copying the input and output (so a redactor never touches live objects) but not writing
+the file. The callback figure is a paired difference: the graph is built once and each rep times the same number of
+invocations with and without the callback, alternating which goes first. The callback adds 0.39 ms to a run that takes 1.6 ms with a model that
 answers instantly; against a real model call (hundreds of milliseconds) it is noise.
 Python 3.13.14, Darwin arm64. Reproduce: `uv run python bench/overhead.py`.
 <!-- overhead:end -->
@@ -142,8 +149,10 @@ check minimality against a brute-force LCS on random sequences). Then:
 - the **first divergence** is the earliest entry that isn't equal or whose output differs, skipping graph nodes whose
   output differs only because a step inside them did.
 
-Tool-call ids are dropped when messages are recorded (providers generate them at random), so identical runs have
-identical signatures. The viewer uses the same algorithm; a test checks it reproduces the Python diff on the case-study
+Providers generate tool-call ids at random, so they are recorded as their position in the conversation (`#0`, `#1`, ...):
+identical runs get identical signatures, while a run whose tool results come back swapped between calls still differs.
+A model step's input also carries a digest of the offered tool schemas and the sampling parameters, so changing a tool
+description or the temperature changes the signature too. The viewer uses the same algorithm; a test checks it reproduces the Python diff on the case-study
 runs.
 
 ## Limits
@@ -151,6 +160,8 @@ runs.
 - One run per recorder; no storage server, search or auth. Runs are files.
 - Integrations: LangChain/LangGraph callbacks and MCP. Other frameworks can use the `Recorder` API directly.
 - Streaming tokens aren't captured individually; a streamed model call is recorded as one step with its final message.
+  With n > 1 completions per call, only the first is recorded.
+- The viewer compares values after `JSON.parse`, so it can't tell `1` from `1.0`; the Python diff can.
 - Replay matches tool calls on exact arguments. An agent that puts timestamps or random ids in tool arguments needs a
   `redact` hook to normalise them before recording.
 - The case study has one scenario and one local model. It shows the diff localising a real behaviour change, not a

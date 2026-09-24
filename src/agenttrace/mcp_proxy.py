@@ -19,6 +19,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import IO, Any
@@ -30,51 +31,70 @@ JsonObj = dict[str, Any]
 
 
 def _name_and_input(method: str, params: Any) -> tuple[str, Any]:
+    if isinstance(params, dict) and "_meta" in params:
+        # Per-request metadata (progress tokens) differs every call and isn't part of the request.
+        params = {k: v for k, v in params.items() if k != "_meta"}
     if method == "tools/call" and isinstance(params, dict):
         return str(params.get("name", "?")), params.get("arguments") or {}
     return method, params
 
 
 class McpTap:
-    """Pairs requests with responses by JSON-RPC id and records them as steps."""
+    """Pairs requests with responses by JSON-RPC id and records them as steps.
 
-    def __init__(self, recorder: Recorder) -> None:
+    `scope` separates id spaces: over HTTP each POST carries its own responses, so
+    two clients (or sessions) that both use id 1 don't get each other's results.
+    Writes to disk are throttled to one per `save_every` seconds; call `flush()` at exit.
+    """
+
+    def __init__(self, recorder: Recorder, save_every: float = 0.5) -> None:
         self.rec = recorder
-        self._open: dict[str, Step] = {}
+        self.save_every = save_every
+        self._open: dict[tuple[Any, str], Step] = {}
         self._lock = threading.Lock()
+        self._saved = 0.0
 
-    def client_message(self, msg: Any) -> None:
+    def client_message(self, msg: Any, scope: Any = None) -> None:
         for m in msg if isinstance(msg, list) else [msg]:
             if isinstance(m, dict) and "method" in m and "id" in m:
                 name, inp = _name_and_input(str(m["method"]), m.get("params"))
                 step = self.rec.begin("mcp", name, inp, method=m["method"])
                 with self._lock:
-                    self._open[canonical(m["id"])] = step
+                    self._open[(scope, canonical(m["id"]))] = step
 
-    def server_message(self, msg: Any) -> None:
+    def server_message(self, msg: Any, scope: Any = None) -> None:
         for m in msg if isinstance(msg, list) else [msg]:
             if not isinstance(m, dict) or "id" not in m or "method" in m:
                 continue
             with self._lock:
-                step = self._open.pop(canonical(m["id"]), None)
+                step = self._open.pop((scope, canonical(m["id"])), None)
             if step is None:
                 continue
             if "error" in m:
                 err = m["error"]
-                self.rec.end(step, error=str(err.get("message", err)) if isinstance(err, dict) else str(err))
-                step.output = err
+                message = str(err.get("message", err)) if isinstance(err, dict) else str(err)
+                self.rec.end(step, output=err, error=message)
             else:
                 self.rec.end(step, m.get("result"))
+        now = time.monotonic()
+        if now - self._saved >= self.save_every:
+            self._saved = now
             self.rec.save()
+
+    def flush(self) -> None:
+        self.rec.save()
 
 
 class McpReplayer:
-    """Answers JSON-RPC requests from a recording. tools/call is matched on tool name
-    and arguments (repeated identical calls answer in recorded order); other methods
-    on method and params, falling back to method alone (so `initialize` from a
-    newer client still gets the recorded server's answer)."""
+    """Answers JSON-RPC requests from a recording. Calls are matched on method, name and
+    params (repeated identical calls answer in recorded order). Only discovery methods
+    (`initialize`, `*/list`) fall back to the recorded answer for the method alone, so a
+    newer client's `initialize` still works; anything else unrecorded is an error."""
 
     MISS = -32001
+    FALLBACK = frozenset(
+        {"initialize", "tools/list", "prompts/list", "resources/list", "resources/templates/list"}
+    )
 
     def __init__(self, run: Run) -> None:
         self._exact: dict[str, deque[Step]] = defaultdict(deque)
@@ -85,9 +105,10 @@ class McpReplayer:
                 continue
             method = str(s.attrs.get("method", s.name))
             self._exact[self._key(method, s.name, s.input)].append(s)
-            if method != "tools/call":
+            if method in self.FALLBACK:
                 self._method.setdefault(method, s)
         self.misses: list[str] = []
+        self.fallbacks: list[str] = []
 
     @staticmethod
     def _key(method: str, name: str, inp: Any) -> str:
@@ -108,8 +129,9 @@ class McpReplayer:
         step = q.popleft() if q else self._last.get(key)
         if step is not None:
             self._last[key] = step
-        elif method != "tools/call":
-            step = self._method.get(method)
+        elif method in self._method:
+            step = self._method[method]
+            self.fallbacks.append(method)
         if step is None:
             self.misses.append(f"{name} {canonical(inp)}")
             return {
@@ -164,7 +186,7 @@ def run_stdio_record(path: str | Path, command: list[str], stdin: IO[bytes], std
     finally:
         if proc.poll() is None:
             proc.terminate()
-        rec.save()
+        tap.flush()
     return code
 
 

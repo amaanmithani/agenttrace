@@ -12,11 +12,11 @@ agent deterministically with no network.
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, Literal
 
 from agenttrace.diff import delta
-from agenttrace.messages import dict_to_ai_message, message_to_dict
+from agenttrace.messages import dict_to_ai_message, messages_to_dicts
 from agenttrace.trace import Run, Step, canonical
 
 OnMiss = Literal["error", "live"]
@@ -39,17 +39,23 @@ class Pins:
     """Recorded responses by (tool name, arguments). Repeated identical calls are
     answered in recorded order; once exhausted, the last response repeats."""
 
-    def __init__(self, run: Run, kinds: tuple[str, ...] = ("tool", "mcp")) -> None:
+    def __init__(
+        self,
+        run: Run,
+        kinds: tuple[str, ...] = ("tool", "mcp"),
+        normalize: Callable[[str, Any], Any] | None = None,
+    ) -> None:
         self._q: dict[str, deque[Step]] = defaultdict(deque)
         self._last: dict[str, Step] = {}
+        self.normalize = normalize or (lambda _name, args: args)
         self.hits = 0
         self.misses = 0
         for s in run.steps:
             if s.kind in kinds:
-                self._q[_tool_key(s.name, s.input)].append(s)
+                self._q[_tool_key(s.name, self.normalize(s.name, s.input))].append(s)
 
     def lookup(self, name: str, args: Any) -> Step | None:
-        k = _tool_key(name, args)
+        k = _tool_key(name, self.normalize(name, args))
         q = self._q.get(k)
         s: Step | None
         if q:
@@ -76,7 +82,20 @@ def pin_tools(tools: Sequence[Any], run: Run, on_miss: OnMiss = "error") -> list
     """LangChain tools with the same names and schemas that answer from `run`."""
     from langchain_core.tools import StructuredTool
 
-    pins = Pins(run)
+    schemas = {t.name: t.args_schema for t in tools}
+
+    def normalize(name: str, args: Any) -> Any:
+        # Recorded inputs are what the model sent; calls arrive with defaults filled
+        # in and types coerced. Put both through the tool's schema to compare them.
+        schema = schemas.get(name)
+        if not isinstance(args, dict) or schema is None or not hasattr(schema, "model_validate"):
+            return args
+        try:
+            return schema.model_validate(args).model_dump(mode="json")
+        except Exception:
+            return args
+
+    pins = Pins(run, normalize=normalize)
     out = []
     for t in tools:
 
@@ -122,11 +141,17 @@ def ReplayChatModel(run: Run, strict: bool = True) -> Any:
         @property
         def _identifying_params(self) -> dict[str, Any]:
             # Report the recorded model's name, so a replayed run diffs clean against the original.
+            # ...and its sampling parameters, which are part of the recorded request.
             nxt = steps[min(self.position, len(steps) - 1)] if steps else None
-            return {"model": nxt.name if nxt else "replay"}
+            params = nxt.input.get("params", {}) if nxt and isinstance(nxt.input, dict) else {}
+            return {**params, "model": nxt.name if nxt else "replay"}
 
         def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> Any:
             return self.bind(tools=[convert_to_openai_tool(t) for t in tools])
+
+        def reset(self) -> None:
+            """Start again from the first recorded model call (for a second invoke)."""
+            self.position = 0
 
         def _generate(self, messages: list[Any], stop: Any = None, run_manager: Any = None, **kw: Any) -> Any:
             if self.position >= len(steps):
@@ -136,8 +161,16 @@ def ReplayChatModel(run: Run, strict: bool = True) -> Any:
             rec = steps[self.position]
             self.position += 1
             if strict:
-                got = [message_to_dict(m) for m in messages]
+                got = messages_to_dicts(messages)
                 want = rec.input.get("messages") if isinstance(rec.input, dict) else None
+                want_tools = rec.input.get("tools") if isinstance(rec.input, dict) else None
+                got_tools = sorted(t["function"]["name"] for t in kw.get("tools") or []) or None
+                if want_tools is not None and got_tools != want_tools:
+                    raise ReplayDivergence(
+                        f"model call #{self.position} offers tools {got_tools}, "
+                        f"recorded step {rec.id} offered {want_tools}",
+                        rec,
+                    )
                 if canonical(got) != canonical(want):
                     probe = Step(0, "llm", rec.name, input={"messages": got})
                     raise ReplayDivergence(

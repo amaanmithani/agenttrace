@@ -165,7 +165,8 @@ def diff_runs(a: Run, b: Run) -> RunDiff:
             )
             i += 1
             continue
-        # Collect a run of removals and additions, then pair them positionally by kind+name.
+        # A run of removals and additions: pair same-kind, same-name steps in order
+        # (monotone in both runs), and keep every entry in its place in both runs.
         rem: list[Step] = []
         add: list[Step] = []
         while i < len(raw) and raw[i][0] != "equal":
@@ -175,24 +176,28 @@ def diff_runs(a: Run, b: Run) -> RunDiff:
             else:
                 add.append(b.steps[y])
             i += 1
-        used: set[int] = set()
-        for r in rem:
-            match = next(
-                (j for j, s in enumerate(add) if j not in used and (s.kind, s.name) == (r.kind, r.name)), None
-            )
-            if match is None:
-                entries.append(Entry("removed", r, None))
-            else:
-                used.add(match)
-                entries.append(Entry("changed", r, add[match]))
-        entries.extend(Entry("added", None, s) for j, s in enumerate(add) if j not in used)
+        pairs: list[tuple[int, int]] = []
+        j0 = 0
+        for ri, r in enumerate(rem):
+            j = next((j for j in range(j0, len(add)) if (add[j].kind, add[j].name) == (r.kind, r.name)), None)
+            if j is not None:
+                pairs.append((ri, j))
+                j0 = j + 1
+        ri = aj = 0
+        for pr, pa in [*pairs, (len(rem), len(add))]:
+            # Unpaired steps before the next pair: A's, then B's (timestamps from two
+            # runs aren't comparable, so there is no finer order to use).
+            entries.extend(Entry("removed", r, None) for r in rem[ri:pr])
+            entries.extend(Entry("added", None, s_) for s_ in add[aj:pa])
+            if pr < len(rem) and pa < len(add):
+                entries.append(Entry("changed", rem[pr], add[pa]))
+            ri, aj = pr + 1, pa + 1
 
-    has_children = {s.parent for s in a.steps if s.parent is not None} | {
-        -s.parent for s in b.steps if s.parent is not None
-    }
+    parents_a = {s.parent for s in a.steps if s.parent is not None}
+    parents_b = {s.parent for s in b.steps if s.parent is not None}
 
     def container(e: Entry) -> bool:
-        return (e.a is not None and e.a.id in has_children) or (e.b is not None and -e.b.id in has_children)
+        return (e.a is not None and e.a.id in parents_a) or (e.b is not None and e.b.id in parents_b)
 
     first = next((e for e in entries if e.diverges and not (e.op == "equal" and container(e))), None)
     if first is None:

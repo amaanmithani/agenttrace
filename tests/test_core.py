@@ -80,7 +80,7 @@ def test_traced_decorator_and_redaction() -> None:
 
     def redact(step: Step) -> None:
         if isinstance(step.input, dict):
-            step.input.get("kwargs", {}).pop("secret", None)
+            step.input.pop("secret", None)
 
     with Recorder(redact=redact) as rec:
         assert lookup("y", secret="hunter2") == "Y"

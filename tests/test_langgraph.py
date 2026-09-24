@@ -59,7 +59,7 @@ def test_records_nodes_models_and_tools(tmp_path: Any) -> None:
     assert first_llm.input["tools"] == ["lookup_order", "refund_policy"]
     assert run.of_kind("llm")[1].output == {
         "content": "",
-        "tool_calls": [{"name": "refund_policy", "args": {}}],
+        "tool_calls": [{"name": "refund_policy", "args": {}, "id": "#0"}],
     }
     # Round-trips through the file.
     again = Run.load(tmp_path / "r.jsonl")

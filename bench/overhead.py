@@ -59,36 +59,45 @@ def recorder_overhead(n: int = 20000, reps: int = 7) -> dict[str, float]:
     }
 
 
-def callback_overhead(runs: int = 300, reps: int = 5) -> dict[str, float]:
+def callback_overhead(runs: int = 200, reps: int = 15) -> dict[str, float]:
+    """Paired design: the graph is built once; each rep times `runs` invocations without
+    and with the callback, in alternating order, and the per-rep difference is kept.
+    Reports the median and the spread of those differences."""
     q = {"messages": [HumanMessage("Can I get a refund for order 42?")]}
+    model = ScriptedModel(script=list(GOOD) * (runs * 2 + 2))
+    graph = sa.build_graph(model)
 
-    def once(record: bool) -> int:
-        g = sa.build_graph(ScriptedModel(script=list(GOOD)))
-        if not record:
-            g.invoke(q)
-            return 0
-        rec = Recorder()
-        g.invoke(q, config={"callbacks": [AgentTraceCallback(rec)]})
-        return len(rec.run)
+    def batch(record: bool) -> float:
+        t = time.perf_counter_ns()
+        for _ in range(runs):
+            model.calls = 0
+            if record:
+                rec = Recorder()
+                graph.invoke(q, config={"callbacks": [AgentTraceCallback(rec)]})
+            else:
+                graph.invoke(q)
+        return (time.perf_counter_ns() - t) / runs
 
-    steps = once(True)
-    diffs = []
-    base = []
-    for _ in range(reps):
-        t0 = time.perf_counter_ns()
-        for _ in range(runs):
-            once(False)
-        t1 = time.perf_counter_ns()
-        for _ in range(runs):
-            once(True)
-        t2 = time.perf_counter_ns()
-        base.append((t1 - t0) / runs)
-        diffs.append(((t2 - t1) - (t1 - t0)) / runs)
+    rec = Recorder()
+    model.calls = 0
+    graph.invoke(q, config={"callbacks": [AgentTraceCallback(rec)]})
+    steps = len(rec.run)
+    batch(False)
+    batch(True)  # warm-up
+    base, diffs = [], []
+    for i in range(reps):
+        order = (False, True) if i % 2 == 0 else (True, False)
+        t = {rec_: batch(rec_) for rec_ in order}
+        base.append(t[False])
+        diffs.append(t[True] - t[False])
+    per_step = sorted(d / steps / 1e3 for d in diffs)
     return {
         "steps_per_run": steps,
         "run_without_ms": statistics.median(base) / 1e6,
         "overhead_per_run_ms": statistics.median(diffs) / 1e6,
-        "overhead_per_step_us": statistics.median(diffs) / steps / 1e3,
+        "overhead_per_step_us": statistics.median(per_step),
+        "overhead_per_step_us_p25": per_step[len(per_step) // 4],
+        "overhead_per_step_us_p75": per_step[(3 * len(per_step)) // 4],
         "runs": runs,
         "reps": reps,
     }

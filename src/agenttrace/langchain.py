@@ -13,9 +13,9 @@ from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 
-from agenttrace.messages import message_to_dict
+from agenttrace.messages import message_to_dict, messages_to_dicts
 from agenttrace.recorder import Recorder
-from agenttrace.trace import Step
+from agenttrace.trace import Step, digest
 
 
 class AgentTraceCallback(BaseCallbackHandler):
@@ -31,7 +31,17 @@ class AgentTraceCallback(BaseCallbackHandler):
         self.record_graph = record_graph
         self._steps: dict[UUID, Step] = {}
         self._done: dict[UUID, Step] = {}
+        self._digests: dict[int, tuple[Any, str]] = {}
         self._parents: dict[UUID, UUID | None] = {}
+
+    def _tools_digest(self, tools: Any) -> str:
+        # The bound tool list is the same object on every call of a bound model: hash it once.
+        hit = self._digests.get(id(tools))
+        if hit is not None and hit[0] is tools:
+            return hit[1]
+        d = digest(sorted((_tool_name(t), _plain(t)) for t in tools))
+        self._digests[id(tools)] = (tools, d)
+        return d
 
     def _parent(self, parent_run_id: UUID | None) -> int | None:
         seen = 0
@@ -47,14 +57,21 @@ class AgentTraceCallback(BaseCallbackHandler):
         self, run_id: UUID, parent_run_id: UUID | None, kind: Any, name: str, inp: Any, **attrs: Any
     ) -> None:
         self._parents[run_id] = parent_run_id
-        self._steps[run_id] = self.rec.begin(kind, name, inp, parent=self._parent(parent_run_id), **attrs)
+        # Everything passed here was built by _plain/messages_to_dicts: fresh, JSON-shaped.
+        self._steps[run_id] = self.rec.begin(
+            kind, name, inp, parent=self._parent(parent_run_id), fresh=True, **attrs
+        )
 
     def _close(self, run_id: UUID, output: Any = None, error: BaseException | None = None) -> None:
         step = self._steps.pop(run_id, None)
         if step is not None:
-            self.rec.end(step, output, error)
+            self.rec.end(step, output, error, fresh=True)
             # Keep it so children whose callbacks arrive late still resolve their parent.
             self._done[run_id] = step
+        if self._parents.get(run_id, 0) is None and not self._steps:
+            # The root run finished: drop the bookkeeping so a long-lived handler doesn't grow.
+            self._done.clear()
+            self._parents.clear()
 
     # graph nodes ---------------------------------------------------------------------------------
     def on_chain_start(
@@ -101,11 +118,28 @@ class AgentTraceCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         params = invocation_params or kwargs.get("invocation_params") or {}
-        inp: dict[str, Any] = {"messages": [message_to_dict(m) for m in (messages[0] if messages else [])]}
+        inp: dict[str, Any] = {"messages": messages_to_dicts(messages[0] if messages else [])}
         tools = params.get("tools")
         if tools:
+            # Names for reading, a digest of the full schemas so a changed description
+            # or parameter also changes the step's signature.
             inp["tools"] = sorted(_tool_name(t) for t in tools)
-        model = params.get("model") or params.get("model_name") or (serialized or {}).get("name") or "chat"
+            inp["tools_digest"] = self._tools_digest(tools)
+        meta = kwargs.get("metadata") or {}
+        sampling = {
+            k: params.get(k, meta.get(f"ls_{k}"))
+            for k in ("temperature", "top_p", "seed", "tool_choice", "max_tokens")
+            if params.get(k, meta.get(f"ls_{k}")) is not None
+        }
+        if sampling:
+            inp["params"] = _plain(sampling)
+        model = (
+            params.get("model")
+            or params.get("model_name")
+            or meta.get("ls_model_name")
+            or (serialized or {}).get("name")
+            or "chat"
+        )
         self._open(run_id, parent_run_id, "llm", str(model), inp)
 
     def on_llm_start(
@@ -118,13 +152,18 @@ class AgentTraceCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         self._open(
-            run_id, parent_run_id, "llm", str((serialized or {}).get("name") or "llm"), {"prompts": prompts}
+            run_id,
+            parent_run_id,
+            "llm",
+            str((serialized or {}).get("name") or "llm"),
+            {"prompts": list(prompts)},
         )
 
     def on_llm_end(self, response: Any, *, run_id: UUID, **kwargs: Any) -> None:
         step = self._steps.get(run_id)
         out: Any = None
         gens = getattr(response, "generations", None) or [[]]
+        # One step per call: with n>1 completions only the first is recorded.
         first = gens[0][0] if gens and gens[0] else None
         if first is not None:
             msg = getattr(first, "message", None)
@@ -153,7 +192,9 @@ class AgentTraceCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         name = kwargs.get("name") or (serialized or {}).get("name") or "tool"
-        self._open(run_id, parent_run_id, "tool", str(name), inputs if inputs is not None else input_str)
+        self._open(
+            run_id, parent_run_id, "tool", str(name), _plain(inputs) if inputs is not None else input_str
+        )
 
     def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
         self._close(run_id, _plain(getattr(output, "content", output)))
@@ -171,13 +212,19 @@ def _tool_name(t: Any) -> str:
     return str(getattr(t, "name", t))
 
 
+def _is_message(v: Any) -> bool:
+    return hasattr(v, "type") and hasattr(v, "content")
+
+
 def _plain(v: Any) -> Any:
     """Make graph state JSON-friendly: messages become dicts, other objects strings."""
     if isinstance(v, dict):
         return {str(k): _plain(x) for k, x in v.items()}
     if isinstance(v, list | tuple):
+        if v and all(_is_message(x) for x in v):
+            return messages_to_dicts(v)
         return [_plain(x) for x in v]
-    if hasattr(v, "type") and hasattr(v, "content"):
+    if _is_message(v):
         return message_to_dict(v)
     if v is None or isinstance(v, str | int | float | bool):
         return v

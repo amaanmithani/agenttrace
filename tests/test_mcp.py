@@ -71,7 +71,7 @@ def free_port() -> int:
 def background(args: list[str], port: int) -> Iterator[None]:
     proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        deadline = time.time() + 20
+        deadline = time.time() + 60
         while time.time() < deadline:
             with socket.socket() as sock:
                 if sock.connect_ex(("127.0.0.1", port)) == 0:

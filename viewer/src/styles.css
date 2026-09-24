@@ -131,3 +131,10 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:
 @media (prefers-reduced-motion: no-preference) {
   .row button { transition: background-color 120ms ease; }
 }
+
+/* Continuous rails: rows touch, and each cell carries its rail through its full height. */
+.fork .row button { padding-top: 0; padding-bottom: 0; align-items: stretch; }
+.fork .row.shared .cell.both, .cell { padding-top: 0.45rem; padding-bottom: 0.45rem; min-height: 2.5rem; }
+.fork .row.split button { align-items: stretch; padding-top: 0; padding-bottom: 0; }
+.fork .row.split .tag { align-self: center; }
+.fork .row.first .cell { padding-top: 0.6rem; }

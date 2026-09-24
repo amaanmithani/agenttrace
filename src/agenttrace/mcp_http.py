@@ -3,6 +3,7 @@ upstream MCP endpoint (recording) or answers from a recording (replay)."""
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import json
 import uuid
@@ -28,6 +29,8 @@ FORWARD = (
     "authorization",
     "last-event-id",
 )
+# Response headers passed back to the client (WWW-Authenticate drives MCP's OAuth discovery).
+BACK = (*FORWARD, "www-authenticate", "cache-control")
 
 
 def _sse_messages(buffer: str) -> tuple[list[Any], str]:
@@ -49,25 +52,28 @@ def record_app(path: str | Path, upstream: str, client: httpx.AsyncClient | None
 
     async def mcp(request: Request) -> Response:
         body = await request.body()
+        scope = object()  # this request's responses come back on this request
         if request.method == "POST" and body:
             with contextlib.suppress(json.JSONDecodeError):
-                tap.client_message(json.loads(body))
+                tap.client_message(json.loads(body), scope)
         headers = {k: v for k, v in request.headers.items() if k.lower() in FORWARD}
         req = client.build_request(request.method, upstream, headers=headers, content=body)
         resp = await client.send(req, stream=True)
-        out_headers = {k: v for k, v in resp.headers.items() if k.lower() in FORWARD}
+        out_headers = {k: v for k, v in resp.headers.items() if k.lower() in BACK}
         ctype = resp.headers.get("content-type", "")
 
         if ctype.startswith("text/event-stream"):
 
             async def stream() -> AsyncIterator[bytes]:
                 buf = ""
+                # A multi-byte character can straddle two chunks.
+                decoder = codecs.getincrementaldecoder("utf-8")("replace")
                 try:
                     async for chunk in resp.aiter_bytes():
-                        buf += chunk.decode("utf-8", "replace")
+                        buf += decoder.decode(chunk)
                         msgs, buf = _sse_messages(buf)
                         for m in msgs:
-                            tap.server_message(m)
+                            tap.server_message(m, scope)
                         yield chunk
                 finally:
                     await resp.aclose()
@@ -78,10 +84,15 @@ def record_app(path: str | Path, upstream: str, client: httpx.AsyncClient | None
         await resp.aclose()
         if ctype.startswith("application/json") and content:
             with contextlib.suppress(json.JSONDecodeError):
-                tap.server_message(json.loads(content))
+                tap.server_message(json.loads(content), scope)
         return Response(content, status_code=resp.status_code, headers=out_headers)
 
-    return Starlette(routes=[Route("/mcp", mcp, methods=["GET", "POST", "DELETE"])])
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+        yield
+        tap.flush()
+
+    return Starlette(routes=[Route("/mcp", mcp, methods=["GET", "POST", "DELETE"])], lifespan=lifespan)
 
 
 def replay_app(path: str | Path) -> Starlette:

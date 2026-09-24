@@ -156,18 +156,27 @@ export function diffRuns(A: Run, B: Run): { entries: Entry[]; first: number } {
       else add.push(B.steps[yy]!);
       i++;
     }
-    const used = new Set<number>();
-    for (const r of rem) {
-      const j = add.findIndex((s, k) => !used.has(k) && s.kind === r.kind && s.name === r.name);
-      if (j < 0) entries.push({ op: 'removed', a: r, outputDiffers: false });
-      else {
-        used.add(j);
-        entries.push({ op: 'changed', a: r, b: add[j]!, outputDiffers: false });
-      }
-    }
-    add.forEach((s, k) => {
-      if (!used.has(k)) entries.push({ op: 'added', b: s, outputDiffers: false });
+    // Pair same-kind, same-name steps in order (monotone in both runs); unpaired
+    // steps keep their place: A's, then B's, before the next pair.
+    const pairs: [number, number][] = [];
+    let j0 = 0;
+    rem.forEach((r, ri) => {
+      for (let j = j0; j < add.length; j++)
+        if (add[j]!.kind === r.kind && add[j]!.name === r.name) {
+          pairs.push([ri, j]);
+          j0 = j + 1;
+          return;
+        }
     });
+    let ri = 0;
+    let aj = 0;
+    for (const [pr, pa] of [...pairs, [rem.length, add.length] as [number, number]]) {
+      rem.slice(ri, pr).forEach((r) => entries.push({ op: 'removed', a: r, outputDiffers: false }));
+      add.slice(aj, pa).forEach((x) => entries.push({ op: 'added', b: x, outputDiffers: false }));
+      if (pr < rem.length && pa < add.length) entries.push({ op: 'changed', a: rem[pr]!, b: add[pa]!, outputDiffers: false });
+      ri = pr + 1;
+      aj = pa + 1;
+    }
   }
   const parentsA = new Set(A.steps.map((s) => s.parent).filter((p) => p != null));
   const parentsB = new Set(B.steps.map((s) => s.parent).filter((p) => p != null));

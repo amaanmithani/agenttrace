@@ -1,14 +1,15 @@
 """Case study: a backend change that silently changed a support agent's answer.
 
 The order service's v2 response drops the `opened` field (a serializer refactor).
-Nothing errors. The agent's final answer changes from "store credit" to "full refund".
+Nothing errors, but the agent's final answer changes.
 This script records the agent before and after the change with a live local model,
 then uses agenttrace to find where the runs part ways, and runs two controls:
 
   1. full replay of the "before" run with no model and no tools: must be identical;
-  2. tools-only replay: the live model again, with the "before" tool responses pinned.
-     If this is identical to "before", the model is deterministic here and the
-     divergence is caused by the tool, not by sampling noise.
+  2. tools-only replay, both ways: the live model again with the "before" tool
+     responses pinned, and again with the "after" ones. If each reproduces its own
+     run exactly, the model is deterministic on these inputs (temperature 0, fixed
+     seed) and the tool output alone decides which run you get.
 
 Writes examples/runs/*.jsonl, results/case-study.json and results/case-study-diff.json.
 Run: uv run python examples/case_study.py [--model llama3.1:8b]
@@ -97,6 +98,13 @@ def main() -> None:
         {"agent": "support", "tools": "v1 (pinned)", "replay": "tools-only"},
     )
     tools_only = diff_runs(before, tonly)
+    tonly_after, ans_tonly_after = record(
+        sa.build_graph(model(), pin_tools(sa.TOOLS, after)),
+        runs / "after-tools-pinned.jsonl",
+        {"agent": "support", "tools": "v2 (pinned)", "replay": "tools-only"},
+    )
+    tools_only_after = diff_runs(after, tonly_after)
+    called = {s.name for s in before.of_kind("tool")} | {s.name for s in after.of_kind("tool")}
 
     first = d.first
     assert first is not None
@@ -120,7 +128,11 @@ def main() -> None:
             "full_replay_answer_matches": ans_replay == ans_before,
             "tools_only_replay_identical": tools_only.identical,
             "tools_only_answer_matches": ans_tonly == ans_before,
+            "tools_only_after_replay_identical": tools_only_after.identical,
+            "tools_only_after_answer_matches": ans_tonly_after == ans_after,
         },
+        "tools_called": sorted(called),
+        "tools_never_called": sorted({t.name for t in sa.TOOLS} - called),
         "diff_text": text,
     }
     (ROOT / "results").mkdir(exist_ok=True)
