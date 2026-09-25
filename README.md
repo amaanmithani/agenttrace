@@ -17,6 +17,16 @@ several steps before the answer that looks wrong.
 
 Runs are JSON Lines (`agenttrace/1`): a header line, then one object per step.
 
+## Screenshots
+
+![The viewer comparing two runs: four shared steps, then a forked rail at tool lookup_order with the output diff in the side panel](docs/img/viewer-diff.png)
+
+The viewer (`viewer/`, production build served locally) opened with `?sample`, which loads the committed case-study runs `examples/runs/before.jsonl` and `after.jsonl`.
+
+![Terminal output of agenttrace diff on the same two runs, reporting the first divergence at tool lookup_order](docs/img/diff.svg)
+
+`agenttrace diff` on the same two committed runs, run locally.
+
 ## Use
 
 ```sh
