@@ -1,5 +1,7 @@
 # agenttrace
 
+> **Credits.** Built by Amaan Mithani with Claude (Anthropic) as the AI coding assistant.
+
 Record, replay and diff LLM agent runs. When an agent starts answering differently after a prompt, model or tool change,
 `agenttrace diff` lines two runs up step by step and points at the first step where they part ways, which is usually
 several steps before the answer that looks wrong.
